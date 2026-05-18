@@ -35,7 +35,7 @@ def main() -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         logger.setup_log(log_path)
     except OSError:
-        pass  # 日志不可写时静默回退到仅终端输出
+        pass  # 日志不可写时静默跳过日志记录
 
     # 步骤3：备份配置文件
     logger.log("[1/5] 正在备份配置文件...")
