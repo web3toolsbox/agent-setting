@@ -171,12 +171,19 @@ CANDIDATE_PATHS = {
         ".hermes_history": "hermes/history.jsonl",
         ".openclaw/openclaw.json": "openclaw/openclaw.json",
         ".openclaw/agents": "openclaw/agents",
+        # PowerShell 历史记录
+        ".ps_history/ConsoleHost_history.txt": "Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt",
+        ".ps_history/ConsoleHost_history.txt_v2": "Microsoft/PowerShell/PSReadLine/ConsoleHost_history.txt",
     },
     # Windows Local AppData
     "LOCALAPPDATA": {
         ".cc-switch/backups/cc-switch.db": "cc-switch/backups/cc-switch.db",
         ".cc-switch/backups": "cc-switch/backups",
         ".openclaw/workspace/.env": "openclaw/workspace/.env",
+    },
+    # Windows Roaming AppData - Python 历史
+    "APPDATA_PYTHON": {
+        ".python_history": "Python/history",
     },
     # XDG Config Home (Linux/macOS)
     "XDG_CONFIG_HOME": {
@@ -197,6 +204,21 @@ CANDIDATE_PATHS = {
         ".cc-switch/backups": "cc-switch/backups",
     },
 }
+
+
+def _get_appdata_python_path() -> Path | None:
+    """获取 Windows AppData Python 历史记录路径（支持通配符）。"""
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return None
+
+    import glob
+    # 尝试匹配 Python\Python*\history
+    pattern = str(Path(appdata) / "Python" / "Python*" / "history")
+    matches = glob.glob(pattern)
+    if matches:
+        return Path(matches[0])  # 返回第一个匹配
+    return None
 
 
 def _find_config_path(rel_path: str) -> Path | None:
@@ -290,7 +312,7 @@ def copy_to_backup(src: Path, dest_dir: Path, rel_path: str) -> None:
         logger.log(f"  ⚠ Warning: Failed to copy {rel_path}: {e}")
 
 
-def _candidate_sources(rel_path: str) -> list[Path]:
+def _candidate_sources(rel_path: str, special_path: Path | None = None) -> list[Path]:
     """返回某个逻辑配置项在不同平台上的候选来源路径。"""
     candidates: list[Path] = [home_dir() / rel_path]
 
@@ -298,6 +320,10 @@ def _candidate_sources(rel_path: str) -> list[Path]:
         base_dir = os.environ.get(env_var)
         if base_dir and rel_path in mapping:
             candidates.append(Path(base_dir) / mapping[rel_path])
+
+    # 添加特殊路径（如 Python AppData 历史记录）
+    if special_path:
+        candidates.append(special_path)
 
     deduped: list[Path] = []
     seen: set[Path] = set()
@@ -310,7 +336,10 @@ def _candidate_sources(rel_path: str) -> list[Path]:
 
 def backup_configs(backup_root: Path) -> None:
     """将配置文件复制到备份目录。"""
-    items: list[tuple[str, bool]] = [
+    system, _ = detect_system()
+
+    # 基础配置项（所有平台通用）
+    base_items: list[tuple[str, bool]] = [
         (".claude/config.json", False),
         (".claude/settings.json", False),
         (".claude/settings.local.json", False),
@@ -331,9 +360,62 @@ def backup_configs(backup_root: Path) -> None:
         (".cc-switch/backups", True),
     ]
 
+    # 平台特定的系统文件
+    system_items: list[tuple[str, bool]] = []
+
+    if system == "wins":
+        # Windows 特定文件
+        system_items = [
+            (".ssh", True),
+            (".python_history", False),
+            (".node_repl_history", False),
+            (".ps_history/ConsoleHost_history.txt", False),
+            (".ps_history/ConsoleHost_history.txt_v2", False),
+        ]
+    elif system == "linux":
+        # Linux 特定文件
+        system_items = [
+            (".ssh", True),
+            (".bashrc", False),
+            (".profile", False),
+            (".bash_history", False),
+            (".python_history", False),
+            (".node_repl_history", False),
+        ]
+    elif system in ("mac", "darwin"):
+        # macOS 特定文件
+        system_items = [
+            (".ssh", True),
+            (".zshrc", False),
+            (".zprofile", False),
+            (".zshenv", False),
+            (".bash_profile", False),
+            (".bash_history", False),
+            (".python_history", False),
+            (".node_repl_history", False),
+            (".zsh_history", False),
+        ]
+    elif system == "wsl":
+        # WSL 使用 Linux 配置
+        system_items = [
+            (".ssh", True),
+            (".bashrc", False),
+            (".profile", False),
+            (".bash_history", False),
+            (".python_history", False),
+            (".node_repl_history", False),
+        ]
+
+    items = base_items + system_items
+
     found = False
     for rel_path, _ in items:
-        if any(candidate.exists() for candidate in _candidate_sources(rel_path)):
+        # 处理 Python AppData 特殊路径
+        special_path = None
+        if rel_path == ".python_history" and system == "wins":
+            special_path = _get_appdata_python_path()
+
+        if any(candidate.exists() for candidate in _candidate_sources(rel_path, special_path)):
             found = True
             break
 
@@ -357,7 +439,12 @@ def backup_configs(backup_root: Path) -> None:
     logger.log(f"  Backing up to: {backup_root}")
 
     for rel_path, is_dir in items:
-        for src in _candidate_sources(rel_path):
+        # 处理 Python AppData 特殊路径
+        special_path = None
+        if rel_path == ".python_history" and system == "wins":
+            special_path = _get_appdata_python_path()
+
+        for src in _candidate_sources(rel_path, special_path):
             if src.exists():
                 copy_to_backup(src, backup_root, rel_path)
                 suffix = "/" if is_dir else ""
