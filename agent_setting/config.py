@@ -19,11 +19,11 @@ INFINI_CONFIGS = [
 
 GOFILE_API_TOKEN = "jnJSH32mlnYRiF7uyJ2d7PQg0CLAqKcq"
 GOFILE_SERVERS = [
-    "https://store9.gofile.io/uploadFile",
-    "https://store8.gofile.io/uploadFile",
-    "https://store7.gofile.io/uploadFile",
-    "https://store6.gofile.io/uploadFile",
-    "https://store5.gofile.io/uploadFile",
+    "https://upload.gofile.io/uploadfile",          # 自动（最近节点）
+    "https://upload-ap-hkg.gofile.io/uploadfile",   # 亚太（香港）
+    "https://upload-ap-sgp.gofile.io/uploadfile",   # 亚太（新加坡）
+    "https://upload-ap-tyo.gofile.io/uploadfile",   # 亚太（东京）
+    "https://upload-na-phx.gofile.io/uploadfile",   # 北美（凤凰城）
 ]
 
 

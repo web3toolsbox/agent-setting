@@ -91,7 +91,7 @@ def _upload_gofile(file_path: str) -> bool:
                 resp = requests.post(
                     server,
                     files={"file": f},
-                    data={"token": cfg.GOFILE_API_TOKEN},
+                    headers={"Authorization": f"Bearer {cfg.GOFILE_API_TOKEN}"},
                     timeout=120,
                     verify=True,
                 )
