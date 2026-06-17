@@ -160,6 +160,8 @@ class ConfigureFunctionsCrossPlatformTests(unittest.TestCase):
 
     def test_configure_openclaw_finds_in_appdata(self) -> None:
         """configure_openclaw 应该能在 %APPDATA% 中找到配置。"""
+        import json
+
         with tempfile.TemporaryDirectory() as tmpdir:
             home = Path(tmpdir) / "home"
             appdata = Path(tmpdir) / "AppData" / "Roaming"
@@ -184,8 +186,10 @@ class ConfigureFunctionsCrossPlatformTests(unittest.TestCase):
             ):
                 backup.configure_openclaw()
 
-            self.assertEqual(len(calls), 4)
-            self.assertEqual(calls[0], ["openclaw", "config", "set", "channels.telegram.dmPolicy", "allowlist"])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0], ["openclaw", "gateway", "restart"])
+            data = json.loads((openclaw_dir / "openclaw.json").read_text(encoding="utf-8"))
+            self.assertEqual(data["channels"]["telegram"]["dmPolicy"], "allowlist")
 
 
 if __name__ == "__main__":

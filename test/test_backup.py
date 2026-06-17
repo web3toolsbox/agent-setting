@@ -42,24 +42,21 @@ class BackupCommandSafetyTests(unittest.TestCase):
             self.assertEqual(kwargs["text"], True)
             self.assertTrue(any("timed out" in message for message in logs))
 
-    def test_configure_openclaw_continues_after_nonzero_exit(self) -> None:
+    def test_configure_openclaw_writes_json_with_correct_order(self) -> None:
+        """configure_openclaw 应直接写入 JSON：先填 allowFrom，再设 allowlist。"""
+        import json
+
         with tempfile.TemporaryDirectory() as tmpdir:
             home = Path(tmpdir)
             openclaw_dir = home / ".openclaw"
             openclaw_dir.mkdir(parents=True)
-            (openclaw_dir / "openclaw.json").write_text("{}", encoding="utf-8")
+            json_path = openclaw_dir / "openclaw.json"
+            json_path.write_text("{}", encoding="utf-8")
             logs: list[str] = []
             calls: list[list[str]] = []
 
             def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
                 calls.append(cmd)
-                self.assertEqual(kwargs["check"], False)
-                self.assertEqual(kwargs["timeout"], backup.COMMAND_TIMEOUT_SECONDS)
-                self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
-                self.assertEqual(kwargs["capture_output"], True)
-                self.assertEqual(kwargs["text"], True)
-                if cmd[-1] == "allowlist":
-                    return subprocess.CompletedProcess(cmd, 1)
                 return subprocess.CompletedProcess(cmd, 0)
 
             with (
@@ -70,16 +67,38 @@ class BackupCommandSafetyTests(unittest.TestCase):
             ):
                 backup.configure_openclaw()
 
-            self.assertEqual(
-                calls,
-                [
-                    ["openclaw", "config", "set", "channels.telegram.dmPolicy", "allowlist"],
-                    ["openclaw", "config", "set", "channels.telegram.allowFrom", "*"],
-                    ["openclaw", "config", "set", "channels.telegram.groupPolicy", "open"],
-                    ["openclaw", "gateway", "restart"],
-                ],
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            telegram = data["channels"]["telegram"]
+            self.assertEqual(telegram["allowFrom"], ["7765138435"])
+            self.assertEqual(telegram["dmPolicy"], "allowlist")
+            self.assertEqual(telegram["groupPolicy"], "open")
+            # 仅用 CLI 重启网关，不再用 config set
+            self.assertEqual(calls, [["openclaw", "gateway", "restart"]])
+
+    def test_configure_openclaw_preserves_existing_allow_from(self) -> None:
+        """已有的 allowFrom 条目应保留并去重。"""
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir)
+            openclaw_dir = home / ".openclaw"
+            openclaw_dir.mkdir(parents=True)
+            json_path = openclaw_dir / "openclaw.json"
+            json_path.write_text(
+                json.dumps({"channels": {"telegram": {"allowFrom": ["111", "111"]}}}),
+                encoding="utf-8",
             )
-            self.assertTrue(any("exited with code 1" in message for message in logs))
+
+            with (
+                patch.object(backup, "home_dir", return_value=home),
+                patch.object(backup.logger, "log"),
+                patch.object(backup, "_resolve_command", return_value="/usr/bin/openclaw"),
+                patch.object(backup.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)),
+            ):
+                backup.configure_openclaw()
+
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(data["channels"]["telegram"]["allowFrom"], ["111", "7765138435"])
 
     def test_configure_openclaw_skips_when_command_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
